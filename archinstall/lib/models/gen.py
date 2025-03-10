@@ -1,61 +1,31 @@
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any
+from enum import Enum
+from functools import cached_property
+from typing import Any, override
+
+from pydantic import BaseModel
 
 
-@dataclass
-class VersionDef:
-	version_string: str
+class Repository(Enum):
+	Core = 'core'
+	Extra = 'extra'
+	Multilib = 'multilib'
+	Testing = 'testing'
 
-	@classmethod
-	def parse_version(cls) -> List[str]:
-		if '.' in cls.version_string:
-			versions = cls.version_string.split('.')
-		else:
-			versions = [cls.version_string]
-
-		return versions
-
-	@classmethod
-	def major(self) -> str:
-		return self.parse_version()[0]
-
-	@classmethod
-	def minor(cls) -> Optional[str]:
-		versions = cls.parse_version()
-		if len(versions) >= 2:
-			return versions[1]
-
-		return None
-
-	@classmethod
-	def patch(cls) -> Optional[str]:
-		versions = cls.parse_version()
-		if '-' in versions[-1]:
-			_, patch_version = versions[-1].split('-', 1)
-			return patch_version
-
-		return None
-
-	def __eq__(self, other) -> bool:
-		if other.major == self.major and \
-			other.minor == self.minor and \
-			other.patch == self.patch:
-
-			return True
-		return False
-
-	def __lt__(self, other) -> bool:
-		if self.major() > other.major():
-			return False
-		elif self.minor() and other.minor() and self.minor() > other.minor():
-			return False
-		elif self.patch() and other.patch() and self.patch() > other.patch():
-			return False
-
-		return True
-
-	def __str__(self) -> str:
-		return self.version_string
+	def get_repository_list(self) -> list[str]:
+		match self:
+			case Repository.Core:
+				return [Repository.Core.value]
+			case Repository.Extra:
+				return [Repository.Extra.value]
+			case Repository.Multilib:
+				return [Repository.Multilib.value]
+			case Repository.Testing:
+				return [
+					'core-testing',
+					'extra-testing',
+					'multilib-testing'
+				]
 
 
 @dataclass
@@ -74,31 +44,35 @@ class PackageSearchResult:
 	installed_size: int
 	build_date: str
 	last_update: str
-	flag_date: Optional[str]
-	maintainers: List[str]
+	flag_date: str | None
+	maintainers: list[str]
 	packager: str
-	groups: List[str]
-	licenses: List[str]
-	conflicts: List[str]
-	provides: List[str]
-	replaces: List[str]
-	depends: List[str]
-	optdepends: List[str]
-	makedepends: List[str]
-	checkdepends: List[str]
+	groups: list[str]
+	licenses: list[str]
+	conflicts: list[str]
+	provides: list[str]
+	replaces: list[str]
+	depends: list[str]
+	optdepends: list[str]
+	makedepends: list[str]
+	checkdepends: list[str]
 
 	@staticmethod
-	def from_json(data: Dict[str, Any]) -> 'PackageSearchResult':
+	def from_json(data: dict[str, Any]) -> 'PackageSearchResult':
 		return PackageSearchResult(**data)
 
 	@property
 	def pkg_version(self) -> str:
 		return self.pkgver
 
-	def __eq__(self, other) -> bool:
+	@override
+	def __eq__(self, other: object) -> bool:
+		if not isinstance(other, PackageSearchResult):
+			return NotImplemented
+
 		return self.pkg_version == other.pkg_version
 
-	def __lt__(self, other) -> bool:
+	def __lt__(self, other: 'PackageSearchResult') -> bool:
 		return self.pkg_version < other.pkg_version
 
 
@@ -109,10 +83,10 @@ class PackageSearch:
 	valid: bool
 	num_pages: int
 	page: int
-	results: List[PackageSearchResult]
+	results: list[PackageSearchResult]
 
 	@staticmethod
-	def from_json(data: Dict[str, Any]) -> 'PackageSearch':
+	def from_json(data: dict[str, Any]) -> 'PackageSearch':
 		results = [PackageSearchResult.from_json(r) for r in data['results']]
 
 		return PackageSearch(
@@ -125,11 +99,11 @@ class PackageSearch:
 		)
 
 
-@dataclass
-class LocalPackage:
+class LocalPackage(BaseModel):
 	name: str
+	repository: str
 	version: str
-	description:str
+	description: str
 	architecture: str
 	url: str
 	licenses: str
@@ -149,12 +123,46 @@ class LocalPackage:
 	validated_by: str
 	provides: str
 
-	@property
-	def pkg_version(self) -> str:
-		return self.version
+	@override
+	def __eq__(self, other: object) -> bool:
+		if not isinstance(other, LocalPackage):
+			return NotImplemented
 
-	def __eq__(self, other) -> bool:
-		return self.pkg_version == other.pkg_version
+		return self.version == other.version
 
-	def __lt__(self, other) -> bool:
-		return self.pkg_version < other.pkg_version
+	def __lt__(self, other: 'LocalPackage') -> bool:
+		return self.version < other.version
+
+
+class AvailablePackage(BaseModel):
+	name: str
+	architecture: str
+	build_date: str
+	depends_on: str
+	description: str
+	download_size: str
+	groups: str
+	installed_size: str
+	licenses: str
+	optional_deps: str
+	packager: str
+	provides: str
+	replaces: str
+	repository: str
+	url: str
+	validated_by: str
+	version: str
+
+	@cached_property
+	def longest_key(self) -> int:
+		return max(len(key) for key in self.dict().keys())
+
+	# return all package info line by line
+	def info(self) -> str:
+		output = ''
+		for key, value in self.dict().items():
+			key = key.replace('_', ' ').capitalize()
+			key = key.ljust(self.longest_key)
+			output += f'{key} : {value}\n'
+
+		return output
